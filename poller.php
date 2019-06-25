@@ -2,143 +2,202 @@
 <?php
 
 /**
- * Observium
+ * LibreNMS
  *
- *   This file is part of Observium.
+ *   This file is part of LibreNMS.
  *
- * @package    observium
+ * @package    LibreNMS
  * @subpackage poller
- * @author     Adam Armstrong <adama@memetic.org>
  * @copyright  (C) 2006 - 2012 Adam Armstrong
- *
  */
 
-chdir(dirname($argv[0]));
+use LibreNMS\Config;
 
-include("includes/defaults.inc.php");
-include("config.php");
-include("includes/definitions.inc.php");
-include("includes/functions.php");
-include("includes/polling/functions.inc.php");
-include("includes/alerts.inc.php");
+$init_modules = ['polling', 'alerts', 'laravel'];
+require __DIR__ . '/includes/init.php';
 
-$poller_start = utime();
-echo($config['project_name_version']." Poller\n\n");
+$poller_start = microtime(true);
+echo Config::get('base_url') . " Poller\n";
 
-$options = getopt("h:m:i:n:r::d::a::");
+$options = getopt('h:m:i:n:r::d::v::a::f::q');
 
-if ($options['h'] == "odd")      { $options['n'] = "1"; $options['i'] = "2"; }
-elseif ($options['h'] == "even") { $options['n'] = "0"; $options['i'] = "2"; }
-elseif ($options['h'] == "all")  { $where = " "; $doing = "all"; }
-elseif ($options['h'])
-{
-  if (is_numeric($options['h']))
-  {
-    $where = "AND `device_id` = '".$options['h']."'";
-    $doing = $options['h'];
-  }
-  else
-  {
-    $where = "AND `hostname` LIKE '".str_replace('*','%',mres($options['h']))."'";
-    $doing = $options['h'];
-  }
+if (isset($options['h'])) {
+    if ($options['h'] == 'odd') {
+        $options['n'] = '1';
+        $options['i'] = '2';
+    } elseif ($options['h'] == 'even') {
+        $options['n'] = '0';
+        $options['i'] = '2';
+    } elseif ($options['h'] == 'all') {
+        $where = ' ';
+        $doing = 'all';
+    } elseif ($options['h']) {
+        if (is_numeric($options['h'])) {
+            $where = "AND `device_id` = " . $options['h'];
+            $doing = $options['h'];
+        } else {
+            if (preg_match('/\*/', $options['h'])) {
+                $where = "AND `hostname` LIKE '" . str_replace('*', '%', mres($options['h'])) . "'";
+            } else {
+                $where = "AND `hostname` = '" . mres($options['h']) . "'";
+            }
+            $doing = $options['h'];
+        }
+    }
 }
 
-if (isset($options['i']) && $options['i'] && isset($options['n']))
-{
-  $where = true; // FIXME
-  $query = 'SELECT `device_id` FROM (SELECT @rownum :=0) r,
-              (
-                SELECT @rownum := @rownum +1 AS rownum, `device_id`
-                FROM `devices`
-                WHERE `disabled` = 0
-                ORDER BY `device_id` ASC
-              ) temp
-            WHERE MOD(temp.rownum, '.mres($options['i']).') = '.mres($options['n']).';';
-  $doing = $options['n'] ."/".$options['i'];
+if (isset($options['i']) && $options['i'] && isset($options['n'])) {
+    $where = true;
+    // FIXME
+    $query = 'SELECT * FROM (SELECT @rownum :=0) r,
+        (
+            SELECT @rownum := @rownum +1 AS rownum, `devices`.*
+            FROM `devices`
+            WHERE `disabled` = 0
+            ORDER BY `device_id` ASC
+        ) temp
+        WHERE MOD(temp.rownum, '.mres($options['i']).') = '.mres($options['n']).';';
+    $doing = $options['n'].'/'.$options['i'];
 }
 
-if (!$where)
-{
-  echo("-h <device id> | <device hostname wildcard>  Poll single device\n");
-  echo("-h odd                                       Poll odd numbered devices  (same as -i 2 -n 0)\n");
-  echo("-h even                                      Poll even numbered devices (same as -i 2 -n 1)\n");
-  echo("-h all                                       Poll all devices\n\n");
-  echo("-i <instances> -n <number>                   Poll as instance <number> of <instances>\n");
-  echo("                                             Instances start at 0. 0-3 for -n 4\n\n");
-  echo("Debugging and testing options:\n");
-  echo("-r                                           Do not create or update RRDs\n");
-  echo("-d                                           Enable debugging output\n");
-  echo("-m                                           Specify module(s) to be run\n");
-  echo("\n");
-  echo("No polling type specified!\n");
-  exit;
+if (empty($where)) {
+    echo "-h <device id> | <device hostname wildcard>  Poll single device\n";
+    echo "-h odd             Poll odd numbered devices  (same as -i 2 -n 0)\n";
+    echo "-h even            Poll even numbered devices (same as -i 2 -n 1)\n";
+    echo "-h all             Poll all devices\n\n";
+    echo "-i <instances> -n <number>                   Poll as instance <number> of <instances>\n";
+    echo "                   Instances start at 0. 0-3 for -n 4\n\n";
+    echo "Debugging and testing options:\n";
+    echo "-r                 Do not create or update RRDs\n";
+    echo "-f                 Do not insert data into InfluxDB\n";
+    echo "-p                 Do not insert data into Prometheus\n";
+    echo "-d                 Enable debugging output\n";
+    echo "-v                 Enable verbose debugging output\n";
+    echo "-m                 Specify module(s) to be run. Comma separate modules, submodules may be added with /\n";
+    echo "\n";
+    echo "No polling type specified!\n";
+    exit;
 }
 
-if (isset($options['d']))
-{
-  echo("DEBUG!\n");
-  $debug = TRUE;
-  ini_set('display_errors', 1);
-  ini_set('display_startup_errors', 1);
-  ini_set('log_errors', 1);
-  ini_set('error_reporting', 1);
+if (set_debug(isset($options['d'])) || isset($options['v'])) {
+    $versions = version_info();
+    echo <<<EOH
+===================================
+Version info:
+Commit SHA: {$versions['local_sha']}
+Commit Date: {$versions['local_date']}
+DB Schema: {$versions['db_schema']}
+PHP: {$versions['php_ver']}
+MySQL: {$versions['mysql_ver']}
+RRDTool: {$versions['rrdtool_ver']}
+SNMP: {$versions['netsnmp_ver']}
+==================================
+EOH;
+
+    echo "DEBUG!\n";
+    if (isset($options['v'])) {
+        $vdebug = true;
+    }
+    update_os_cache(true); // Force update of OS Cache
+}
+
+if (isset($options['r'])) {
+    Config::set('norrd', true);
+}
+
+if (isset($options['f'])) {
+    Config::set('noinfluxdb', true);
+}
+
+if (isset($options['p'])) {
+    $prometheus = false;
+}
+
+if (isset($options['g'])) {
+    Config::set('nographite', true);
+}
+
+if (Config::get('base_url') !== true && Config::get('influxdb.enable') === true) {
+    $influxdb = influxdb_connect();
 } else {
-  $debug = FALSE;
-#  ini_set('display_errors', 0);
-  ini_set('display_startup_errors', 0);
-  ini_set('log_errors', 0);
-#  ini_set('error_reporting', 0);
+    $influxdb = false;
 }
 
-if (isset($options['r']))
-{
-  $config['norrd'] = TRUE;
+if (Config::get('base_url') !== true && Config::get('graphite.enable') === true) {
+    $graphite = fsockopen(Config::get('graphite.host'), Config::get('graphite.port'));
+    if ($graphite !== false) {
+        echo "Connection made to " . Config::get('graphite.host') . " for Graphite support\n";
+    } else {
+        echo "Connection to " . Config::get('graphite.host') . " has failed, Graphite support disabled\n";
+        Config::set('nographite', true);
+    }
+} else {
+    $graphite = false;
 }
 
-rrdtool_pipe_open($rrd_process, $rrd_pipes);
+// If we've specified modules with -m, use them
+$module_override = parse_modules('poller', $options);
 
-echo("Starting polling run:\n\n");
+rrdtool_initialize();
+
+echo "Starting polling run:\n\n";
 $polled_devices = 0;
-if (!isset($query))
-{
-  $query = "SELECT `device_id` FROM `devices` WHERE `disabled` = 0 $where ORDER BY `device_id` ASC";
+$unreachable_devices = 0;
+if (!isset($query)) {
+    $query = "SELECT * FROM `devices` WHERE `disabled` = 0 $where ORDER BY `device_id` ASC";
 }
 
-foreach (dbFetch($query) as $device)
-{
-  $device = dbFetchRow("SELECT * FROM `devices` WHERE `device_id` = '".$device['device_id']."'");
-  poll_device($device, $options);
-  RunRules($device['device_id']);
-  echo "\r\n";
-  $polled_devices++;
+foreach (dbFetch($query) as $device) {
+    if ($device['os_group'] == 'cisco') {
+        $device['vrf_lite_cisco'] = dbFetchRows("SELECT * FROM `vrf_lite_cisco` WHERE `device_id` = " . $device['device_id']);
+    } else {
+        $device['vrf_lite_cisco'] = '';
+    }
+
+    if (!poll_device($device, $module_override)) {
+        $unreachable_devices++;
+    }
+
+    echo "#### Start Alerts ####\n";
+    RunRules($device['device_id']);
+    echo "#### End Alerts ####\r\n";
+    $polled_devices++;
 }
 
-$poller_end = utime(); $poller_run = $poller_end - $poller_start; $poller_time = substr($poller_run, 0, 5);
+$poller_end  = microtime(true);
+$poller_run  = ($poller_end - $poller_start);
+$poller_time = substr($poller_run, 0, 5);
 
-if ($polled_devices)
-{
-  dbInsert(array('type' => 'poll', 'doing' => $doing, 'start' => $poller_start, 'duration' => $poller_time, 'devices' => $polled_devices, 'poller' => $config['distributed_poller_name'] ), 'perf_times');
+if ($graphite !== false) {
+    fclose($graphite);
 }
 
-$string = $argv[0] . " $doing " .  date($config['dateformat']['compact']) . " - $polled_devices devices polled in $poller_time secs";
-if ($debug) { echo("$string\n"); }
+if ($polled_devices) {
+    dbInsert(array(
+        'type' => 'poll',
+        'doing' => $doing,
+        'start' => $poller_start,
+        'duration' => $poller_time,
+        'devices' => $polled_devices,
+        'poller' => Config::get('base_url')
+    ), 'perf_times');
+}
 
-echo("\n" .
-     'MySQL: Cell['.($db_stats['fetchcell']+0).'/'.round($db_stats['fetchcell_sec']+0,2).'s]'.
-            ' Row['   .($db_stats['fetchrow']+0). '/'.round($db_stats['fetchrow_sec']+0,2).'s]'.
-           ' Rows['   .($db_stats['fetchrows']+0).'/'.round($db_stats['fetchrows_sec']+0,2).'s]'.
-         ' Column['.($db_stats['fetchcol']+0). '/'.round($db_stats['fetchcol_sec']+0,2).'s]'.
-         ' Update['   .($db_stats['update']+0).'/'.round($db_stats['update_sec']+0,2).'s]'.
-         ' Insert['.($db_stats['insert']+0). '/'.round($db_stats['insert_sec']+0,2).'s]'.
-         ' Delete['.($db_stats['delete']+0). '/'.round($db_stats['delete_sec']+0,2).'s]');
+$string = $argv[0] . " $doing " . date(Config::get('dateformat.compact')) . " - $polled_devices devices polled in $poller_time secs";
+d_echo("$string\n");
 
-echo("\n");
+if (!isset($options['q'])) {
+    printStats();
+}
 
 logfile($string);
-rrdtool_pipe_close($rrd_process, $rrd_pipes);
-unset($config); // Remove this for testing
+rrdtool_close();
 
-#print_r(get_defined_vars());
+// Remove this for testing
+// print_r(get_defined_vars());
 
-?>
+if ($polled_devices === $unreachable_devices) {
+    exit(6);
+}
+
+exit(0);

@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2
 """
  poller-wrapper A small tool which wraps around the poller and tries to
                 guide the polling process with a more modern approach with a
@@ -11,14 +11,10 @@
                 that should run simultaneously. If no argument is given it will assume
                 a default of 16 threads.
 
- Read more:     http://postman.memetic.org/pipermail/observium/2012-November/001303.html
-
  Ubuntu Linux:  apt-get install python-mysqldb
  FreeBSD:       cd /usr/ports/*/py-MySQLdb && make install clean
 
  Tested on:     Python 2.7.3 / PHP 5.3.10-1ubuntu3.4 / Ubuntu 12.04 LTS
-
- GitHub:        https://github.com/Atrato/observium-poller-wrapper
 
  License:       To the extent possible under law, Job Snijders has waived all
                 copyright and related or neighboring rights to this script.
@@ -34,6 +30,7 @@ try:
     import sys
     import threading
     import time
+    from optparse import OptionParser
 
 except:
     print "ERROR: missing one or more of the following python modules:"
@@ -79,10 +76,32 @@ except:
     sys.exit(2)
 
 poller_path = config['install_dir'] + '/poller.php'
+log_dir = config['log_dir']
 db_username = config['db_user']
 db_password = config['db_pass']
-db_server = config['db_host']
+db_port = int(config['db_port'])
+
+if config['db_socket']:
+    db_server = config['db_host']
+    db_socket = config['db_socket']
+else:
+    db_server = config['db_host']
+    db_socket = None
+
 db_dbname = config['db_name']
+
+
+def db_open():
+    try:
+        if db_socket:
+            db = MySQLdb.connect(host=db_server, unix_socket=db_socket, user=db_username, passwd=db_password, db=db_dbname)
+        else:
+            db = MySQLdb.connect(host=db_server, port=db_port, user=db_username, passwd=db_password, db=db_dbname)
+        return db
+    except:
+        print "ERROR: Could not connect to MySQL database!"
+        sys.exit(2)
+
 
 # (c) 2015, GPLv3, Daniel Preussker <f0o@devilcode.org> <<<EOC1
 if 'distributed_poller_group' in config:
@@ -113,31 +132,52 @@ def memc_touch(key, time):
     except:
         pass
 
+
+def get_time_tag(step):
+    ts = int(time.time())
+    return ts - ts % step
+
+
+if 'rrd' in config and 'step' in config['rrd']:
+    step = config['rrd']['step']
+else:
+    step = 300
+
 if ('distributed_poller' in config and
     'distributed_poller_memcached_host' in config and
     'distributed_poller_memcached_port' in config and
         config['distributed_poller']):
+
+    time_tag = str(get_time_tag(step))
+    master_tag = "poller.master." + time_tag
+    nodes_tag = "poller.nodes." + time_tag
+
     try:
         import memcache
         import uuid
         memc = memcache.Client([config['distributed_poller_memcached_host'] + ':' +
             str(config['distributed_poller_memcached_port'])])
+        if str(memc.get(master_tag)) == config['distributed_poller_name']:
+            print "This system is already joined as the poller master."
+            sys.exit(2)
         if memc_alive():
-            if memc.get("poller.master") is None:
+            if memc.get(master_tag) is None:
                 print "Registered as Master"
-                memc.set("poller.master", config['distributed_poller_name'], 10)
-                memc.set("poller.nodes", 0, 300)
+                memc.set(master_tag, config['distributed_poller_name'], 10)
+                memc.set(nodes_tag, 0, step)
                 IsNode = False
             else:
-                print "Registered as Node joining Master %s" % memc.get("poller.master")
+                print "Registered as Node joining Master %s" % memc.get(master_tag)
                 IsNode = True
-                memc.incr("poller.nodes")
+                memc.incr(nodes_tag)
             distpoll = True
         else:
             print "Could not connect to memcached, disabling distributed poller."
             distpoll = False
             IsNode = False
-    except:
+    except SystemExit:
+        raise
+    except ImportError:
         print "ERROR: missing memcache python module:"
         print "On deb systems: apt-get install python-memcache"
         print "On other systems: easy_install python-memcached"
@@ -156,22 +196,20 @@ polled_devices = 0
     Take the amount of threads we want to run in parallel from the commandline
     if None are given or the argument was garbage, fall back to default of 16
 """
+usage = "usage: %prog [options] <workers> (Default: 16 (Do not set too high)"
+description = "Spawn multiple poller.php processes in parallel."
+parser = OptionParser(usage=usage, description=description)
+parser.add_option('-d', '--debug', action='store_true', default=False,
+                  help="Enable debug output. WARNING: Leaving this enabled will consume a lot of disk space.")
+(options, args) = parser.parse_args()
+
+debug = options.debug
 try:
-    amount_of_workers = int(sys.argv[1])
-    if amount_of_workers == 0:
-        print "ERROR: 0 threads is not a valid value"
-        sys.exit(2)
-except:
+    amount_of_workers = int(args[0])
+except (IndexError, ValueError):
     amount_of_workers = 16
 
 devices_list = []
-
-try:
-    db = MySQLdb.connect(host=db_server, user=db_username, passwd=db_password, db=db_dbname)
-    cursor = db.cursor()
-except:
-    print "ERROR: Could not connect to MySQL database!"
-    sys.exit(2)
 
 """
     This query specificly orders the results depending on the last_polled_timetaken variable
@@ -181,11 +219,14 @@ except:
 """
 # (c) 2015, GPLv3, Daniel Preussker <f0o@devilcode.org> <<<EOC2
 if poller_group is not False:
-    query = "select device_id from devices where poller_group = " + poller_group + " and disabled = 0 order by last_polled_timetaken desc"
+    query = "select device_id from devices where poller_group IN(" + poller_group + ") and disabled = 0 order by last_polled_timetaken desc"
 else:
     query = "select device_id from devices where disabled = 0 order by last_polled_timetaken desc"
 # EOC2
 
+
+db = db_open()
+cursor = db.cursor()
 cursor.execute(query)
 devices = cursor.fetchall()
 for row in devices:
@@ -198,6 +239,7 @@ if distpoll and not IsNode:
     maxlocks = devices[0][0]
     minlocks = devices[0][1]
 # EOC3
+db.close()
 
 """
     A seperate queue and a single worker for printing information to the screen prevents
@@ -216,8 +258,8 @@ def printworker():
         global distpoll
         if distpoll:
             if not IsNode:
-                memc_touch('poller.master', 10)
-                nodes = memc.get('poller.nodes')
+                memc_touch(master_tag, 10)
+                nodes = memc.get(nodes_tag)
                 if nodes is None and not memc_alive():
                     print "WARNING: Lost Memcached. Taking over all devices. Nodes will quit shortly."
                     distpoll = False
@@ -226,7 +268,7 @@ def printworker():
                     print "INFO: %s Node(s) Total" % (nodes)
                     nodeso = nodes
             else:
-                memc_touch('poller.nodes', 10)
+                memc_touch(nodes_tag, 10)
             try:
                 worker_id, device_id, elapsed_time = print_queue.get(False)
             except:
@@ -245,7 +287,7 @@ def printworker():
         real_duration += elapsed_time
         per_device_duration[device_id] = elapsed_time
         polled_devices += 1
-        if elapsed_time < 300:
+        if elapsed_time < step:
             print "INFO: worker %s finished device %s in %s seconds" % (worker_id, device_id, elapsed_time)
         else:
             print "WARNING: worker %s finished device %s in %s seconds" % (worker_id, device_id, elapsed_time)
@@ -261,9 +303,9 @@ def poll_worker():
     while True:
         device_id = poll_queue.get()
 # (c) 2015, GPLv3, Daniel Preussker <f0o@devilcode.org> <<<EOC5
-        if not distpoll or memc.get('poller.device.' + str(device_id)) is None:
+        if not distpoll or memc.get('poller.device.%s.%s'% (device_id, time_tag)) is None:
             if distpoll:
-                result = memc.add('poller.device.' + str(device_id), config['distributed_poller_name'], 300)
+                result = memc.add('poller.device.%s.%s'% (device_id, time_tag), config['distributed_poller_name'], step)
                 if not result:
                     print "This device (%s) appears to be being polled by another poller" % (device_id)
                     poll_queue.task_done()
@@ -275,8 +317,11 @@ def poll_worker():
 # EOC5
             try:
                 start_time = time.time()
-                command = "/usr/bin/env php %s -h %s >> /dev/null 2>&1" % (poller_path, device_id)
+
+                output = "-d >> %s/poll_device_%s.log" % (log_dir, device_id) if debug else ">> /dev/null"
+                command = "/usr/bin/env php %s -h %s %s 2>&1" % (poller_path, device_id, output)
                 subprocess.check_call(command, shell=True)
+
                 elapsed_time = int(time.time() - start_time)
                 print_queue.put([threading.current_thread().name, device_id, elapsed_time])
             except (KeyboardInterrupt, SystemExit):
@@ -315,32 +360,34 @@ print "INFO: poller-wrapper polled %s devices in %s seconds with %s workers" % (
 
 # (c) 2015, GPLv3, Daniel Preussker <f0o@devilcode.org> <<<EOC6
 if distpoll or memc_alive():
-    master = memc.get("poller.master")
+    master = memc.get(master_tag)
     if master == config['distributed_poller_name'] and not IsNode:
         print "Wait for all poller-nodes to finish"
-        nodes = memc.get("poller.nodes")
+        nodes = memc.get(nodes_tag)
         while nodes > 0 and nodes is not None:
             try:
                 time.sleep(1)
-                nodes = memc.get("poller.nodes")
+                nodes = memc.get(nodes_tag)
             except:
                 pass
-        print "Clearing Locks"
+        print "Clearing Locks for %s" % time_tag
         x = minlocks
         while x <= maxlocks:
-            memc.delete('poller.device.' + str(x))
-            x = x + 1
+            res = memc.delete('poller.device.%s.%s' % (x, time_tag))
+            x += 1
         print "%s Locks Cleared" % x
         print "Clearing Nodes"
-        memc.delete("poller.master")
-        memc.delete("poller.nodes")
+        memc.delete(master_tag)
+        memc.delete(nodes_tag)
     else:
-        memc.decr("poller.nodes")
-    print "Finished %s." % time.time()
+        memc.decr(nodes_tag)
+    print "Finished %.3fs after interval start." % (time.time() - int(time_tag))
 # EOC6
 
 show_stopper = False
 
+db = db_open()
+cursor = db.cursor()
 query = "update pollers set last_polled=NOW(), devices='%d', time_taken='%d' where poller_name='%s'" % (polled_devices,
         total_time, config['distributed_poller_name'])
 response = cursor.execute(query)
@@ -354,17 +401,17 @@ else:
 db.close()
 
 
-if total_time > 300:
-    print "WARNING: the process took more than 5 minutes to finish, you need faster hardware or more threads"
+if total_time > step:
+    print "WARNING: the process took more than %s seconds to finish, you need faster hardware or more threads" % step
     print "INFO: in sequential style polling the elapsed time would have been: %s seconds" % real_duration
     for device in per_device_duration:
-        if per_device_duration[device] > 300:
+        if per_device_duration[device] > step:
             print "WARNING: device %s is taking too long: %s seconds" % (device, per_device_duration[device])
             show_stopper = True
     if show_stopper:
-        print "ERROR: Some devices are taking more than 300 seconds, the script cannot recommend you what to do."
+        print "ERROR: Some devices are taking more than %s seconds, the script cannot recommend you what to do." % step
     else:
-        recommend = int(total_time / 300.0 * amount_of_workers + 1)
+        recommend = int(total_time / step * amount_of_workers + 1)
         print "WARNING: Consider setting a minimum of %d threads. (This does not constitute professional advice!)" % recommend
 
     sys.exit(2)

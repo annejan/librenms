@@ -1,44 +1,56 @@
+#!/usr/bin/env php
 <?php
+/**
+ * build-base.php
+ *
+ * Create database structure.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * @package    LibreNMS
+ * @link       http://librenms.org
+ * @copyright  2017 Tony Murray
+ * @author     Tony Murray <murraytony@gmail.com>
+ */
 
-// MYSQL Check - FIXME
-// 1 UNKNOWN
+if (!isset($init_modules)) {
+    $opts = getopt('ldh:u:p:n:t:s:');
 
-include( "config.php" );
+    $map = [
+        'h' => 'DB_HOST',
+        'u' => 'DB_USERNAME',
+        'p' => 'DB_PASSWORD',
+        'n' => 'DB_DATABASE',
+        't' => 'DB_PORT',
+        's' => 'DB_SOCKET',
+    ];
 
-if (!isset($sql_file)) {
-	$sql_file = 'build.sql';
-}
-$sql_fh = fopen( $sql_file, 'r' );
-if ($sql_fh === FALSE) {
-	echo( "ERROR: Cannot open SQL build script " . $sql_file . "\n" );
-	exit(1);
-}
-
-$connection = mysql_connect( $config['db_host'], $config['db_user'], $config['db_pass'] );
-if ($connection === FALSE) {
-	echo( "ERROR: Cannot connect to database: " . mysql_error() . "\n" );
-	exit(1);
-}
-
-$select = mysql_select_db( $config['db_name']  );
-if ($select === FALSE) {
-  echo( "ERROR: Cannot select database: " . mysql_error() . "\n" );
-  exit(1);
-}
-
-while( !feof( $sql_fh ) ) {
-  $line = fgetss( $sql_fh );
-  if(!empty($line))
-  {
-    $creation = mysql_query( $line );
-    if( !$creation ) {
-      echo( "WARNING: Cannot execute query (" . $line . "): " . mysql_error() . "\n" );
+    // set env variables
+    foreach ($map as $opt => $env_name) {
+        if (isset($opts[$opt])) {
+            putenv("$env_name=" . $opts[$opt]);
+        }
     }
-  }
+
+    $init_modules = ['nodb', 'laravel'];
+    require __DIR__ . '/includes/init.php';
+
+    set_debug(isset($opts['d']));
+
+    $skip_schema_lock = isset($opts['l']);
 }
 
-fclose($sql_fh);
+require __DIR__ . '/includes/sql-schema/update.php';
 
-include("includes/sql-schema/update.php");
-
-?>
+exit($return);

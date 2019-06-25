@@ -1,6 +1,6 @@
 <?php
-
-/* Observium Network Management and Monitoring System
+/*
+ * LibreNMS Network Management and Monitoring System
  * Copyright (C) 2006-2011, Observium Developers - http://www.observium.org
  *
  * This program is free software: you can redistribute it and/or modify
@@ -11,24 +11,21 @@
  * See COPYING for more details.
  */
 
-// Call poll_sensor for each sensor type that we support.
+use LibreNMS\Config;
 
-$supported_sensors = array('current' => 'A',
-                           'frequency' => 'Hz',
-                           'humidity' => '%',
-                           'fanspeed' => 'rpm',
-                           'power' => 'W',
-                           'voltage' => 'V',
-                           'temperature' => 'C',
-                           'dbm' => 'dBm',
-                           'charge' => '%',
-                           'load' => '%',
-                           'state' => '#',
-    );
+$query = "SELECT `sensor_class` FROM `sensors` WHERE `device_id` = ?";
+$params = [$device['device_id']];
 
-foreach ($supported_sensors as $sensor_type => $sensor_unit)
-{
-  poll_sensor($device, $sensor_type, $sensor_unit);
+$submodules = Config::get('poller_submodules.sensors', []);
+if (!empty($submodules)) {
+    $query .= " AND `sensor_class` IN " . dbGenPlaceholders(count($submodules));
+    $params = array_merge($params, $submodules);
 }
 
-?>
+$query .= " GROUP BY `sensor_class`";
+
+foreach (dbFetchRows($query, $params) as $sensor_type) {
+    poll_sensor($device, $sensor_type['sensor_class']);
+}
+
+unset($submodules, $sensor_type, $query, $params);

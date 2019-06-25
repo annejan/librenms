@@ -12,33 +12,19 @@
  * the source code distribution for details.
  */
 
-// FUA
+use LibreNMS\Authentication\LegacyAuth;
 
-if (isset($_REQUEST['debug']))
-{
-  ini_set('display_errors', 1);
-  ini_set('display_startup_errors', 0);
-  ini_set('log_errors', 0);
-  ini_set('allow_url_fopen', 0);
-  ini_set('error_reporting', E_ALL);
+$init_modules = array('web', 'auth', 'alerts');
+require realpath(__DIR__ . '/..') . '/includes/init.php';
+
+if (!LegacyAuth::check()) {
+    die('Unauthorized');
 }
 
-include_once("../includes/defaults.inc.php");
-include_once("../config.php");
-include_once("../includes/definitions.inc.php");
-include_once("includes/functions.inc.php");
-include_once("../includes/functions.php");
-include_once("includes/authenticate.inc.php");
+set_debug(isset($_REQUEST['debug']) ? $_REQUEST['debug'] : false);
 
-if (!$_SESSION['authenticated']) { echo("unauthenticated"); exit; }
-
-if(preg_match("/^[a-zA-Z0-9\-]+$/", $_POST['type']) == 1) {
-
-  if(file_exists('forms/'.$_POST['type'].'.inc.php'))
-  {
-    include_once('forms/'.$_POST['type'].'.inc.php');
-  }
-
+if (preg_match('/^[a-zA-Z0-9\-]+$/', $_POST['type']) == 1) {
+    if (file_exists('includes/html/forms/'.$_POST['type'].'.inc.php')) {
+        include_once 'includes/html/forms/'.$_POST['type'].'.inc.php';
+    }
 }
-
-?>

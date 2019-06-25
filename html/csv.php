@@ -12,41 +12,30 @@
  * the source code distribution for details.
  */
 
-if (strpos($_SERVER['PATH_INFO'], "debug"))
-{
-  $debug = "1";
-  ini_set('display_errors', 1);
-  ini_set('display_startup_errors', 1);
-  ini_set('log_errors', 1);
-  ini_set('error_reporting', E_ALL);
-} else {
-  $debug = FALSE;
-  ini_set('display_errors', 0);
-  ini_set('display_startup_errors', 0);
-  ini_set('log_errors', 0);
-  ini_set('error_reporting', 0);
+use LibreNMS\Authentication\LegacyAuth;
+use LibreNMS\Config;
+
+$init_modules = ['web', 'auth'];
+require realpath(__DIR__ . '/..') . '/includes/init.php';
+
+if (!LegacyAuth::check()) {
+    die('Unauthorized');
 }
 
-include "../includes/defaults.inc.php";
-include "../config.php";
-include_once "../includes/definitions.inc.php";
-include "../includes/functions.php";
-include "includes/functions.inc.php";
-include "includes/vars.inc.php";
-include "includes/authenticate.inc.php";
+set_debug(strpos($_SERVER['PATH_INFO'], 'debug'));
 
-$report = mres($vars['report']);
-if( !empty($report) && file_exists("includes/reports/$report.csv.inc.php")) {
-	if( $debug == false ) {
-		header("Content-Type: text/csv");
-		header('Content-Disposition: attachment; filename="'.$report.'-'.date('Ymd').'.csv"');
-	}
-	$csv = array();
-	include_once "includes/reports/$report.csv.inc.php";
-	foreach( $csv as $line ) {
-		echo implode(',',$line)."\n";
-	}
+$report = basename($vars['report']);
+if ($report && file_exists(Config::get('install_dir') . "/includes/html/reports/$report.csv.inc.php")) {
+    if ($debug === false) {
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="'.$report.'-'.date('Ymd').'.csv"');
+    }
+
+    $csv = [];
+    require Config::get('install_dir') . "/includes/html/reports/$report.csv.inc.php";
+    foreach ($csv as $line) {
+        echo implode(',', $line)."\n";
+    }
 } else {
-	echo "Report not found.\n";
+    echo "Report not found.\n";
 }
-?>

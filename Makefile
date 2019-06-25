@@ -30,19 +30,28 @@ push-personal pp:
 push-testing pt:
 	$(GIT) push testing
 
-update-subtrees: datetime-subtree moment-subtree font-awesome vis
+update-subtrees: datetime-subtree font-awesome 
 
 datetime-subtree:
 	$(GIT_SUBTREE) --prefix=html/js/datetime https://github.com/Eonasdan/bootstrap-datetimepicker master
 
-moment-subtree:
-	$(GIT_SUBTREE) --prefix=html/js/moment   https://github.com/moment/moment master
-
 font-awesome:
 	$(GIT_SUBTREE) --prefix=lib/Font-Awesome https://github.com/FortAwesome/Font-Awesome.git master
 
-vis:
-	$(GIT_SUBTREE) --prefix=lib/vis https://github.com/almende/vis.git master
+gridster:
+	$(GIT_SUBTREE) --prefix=lib/gridster https://github.com/dsmorse/gridster.js.git master
 
-typeahead:
-	$(GIT_SUBTREE) -- prefix=lib/typeahead https://github.com/twitter/typeahead.js.git master
+jquery-mapael:
+	$(GIT_SUBTREE) --prefix=lib/jQuery-Mapael https://github.com/neveldo/jQuery-Mapael.git master
+
+mapael-maps:
+	$(GIT_SUBTREE) --prefix=lib/mapael-maps https://github.com/neveldo/mapael-maps.git master
+
+jquery-mousewheel:
+	$(GIT_SUBTREE) --prefix=lib/jquery-mousewheel https://github.com/jquery/jquery-mousewheel.git master
+
+Leaflet.markercluster:
+	$(GIT_SUBTREE) --prefix=lib/Leaflet.markercluster https://github.com/Leaflet/Leaflet.markercluster.git master
+
+Leaflet.awesome-markers:
+	$(GIT_SUBTREE) --prefix=lib/Leaflet.awesome-markers https://github.com/lvoogdt/Leaflet.awesome-markers.git 2.0/develop

@@ -1,78 +1,92 @@
 <?php
 
 // Build SNMP Cache Array
+use LibreNMS\Config;
 
-$port_stats = array();
-$port_stats = snmpwalk_cache_oid($device, "ifDescr", $port_stats, "IF-MIB");
-$port_stats = snmpwalk_cache_oid($device, "ifName", $port_stats, "IF-MIB");
-$port_stats = snmpwalk_cache_oid($device, "ifType", $port_stats, "IF-MIB");
+$port_stats = [];
+$port_stats = snmpwalk_cache_oid($device, 'ifDescr', $port_stats, 'IF-MIB');
+$port_stats = snmpwalk_cache_oid($device, 'ifName', $port_stats, 'IF-MIB');
+$port_stats = snmpwalk_cache_oid($device, 'ifAlias', $port_stats, 'IF-MIB');
+$port_stats = snmpwalk_cache_oid($device, 'ifType', $port_stats, 'IF-MIB');
 
 // End Building SNMP Cache Array
+d_echo($port_stats);
 
-if ($debug) { print_r($port_stats); }
 
-// Build array of ports in the database
-
-// FIXME -- this stuff is a little messy, looping the array to make an array just seems wrong. :>
-//       -- i can make it a function, so that you don't know what it's doing.
-//       -- $ports_db = adamasMagicFunction($ports_db); ?
-
-foreach (dbFetchRows("SELECT * FROM `ports` WHERE `device_id` = ?", array($device['device_id'])) as $port)
-{
-  $ports_db[$port['ifIndex']] = $port;
-  $ports_db_l[$port['ifIndex']] = $port['port_id'];
+// By default libreNMS uses the ifIndex to associate ports on devices with ports discoverd/polled
+// before and stored in the database. On Linux boxes this is a problem as ifIndexes may be
+// unstable between reboots or (re)configuration of tunnel interfaces (think: GRE/OpenVPN/Tinc/...)
+// The port association configuration allows to choose between association via ifIndex, ifName,
+// or maybe other means in the future. The default port association mode still is ifIndex for
+// compatibility reasons.
+$port_association_mode = Config::get('default_port_association_mode');
+if ($device['port_association_mode']) {
+    $port_association_mode = get_port_assoc_mode_name($device['port_association_mode']);
 }
+
+// Build array of ports in the database and an ifIndex/ifName -> port_id map
+$ports_mapped = get_ports_mapped($device['device_id']);
+$ports_db = $ports_mapped['ports'];
+
+//
+// Rename any old RRD files still named after the previous ifIndex based naming schema.
+foreach ($ports_mapped['maps']['ifIndex'] as $ifIndex => $port_id) {
+    foreach (['', '-adsl', '-dot3'] as $suffix) {
+        $old_rrd_name = "port-$ifIndex$suffix.rrd";
+        $new_rrd_name = getPortRrdName($port_id, ltrim($suffix, '-'));
+
+        rrd_file_rename($device, $old_rrd_name, $new_rrd_name);
+    }
+}
+
 
 // New interface detection
-foreach ($port_stats as $ifIndex => $port)
-{
-  // Check the port against our filters.
-  if (is_port_valid($port, $device))
-  {
-    if (!is_array($ports_db[$ifIndex]))
-    {
-      $port_id = dbInsert(array('device_id' => $device['device_id'], 'ifIndex' => $ifIndex), 'ports');
-      $ports_db[$ifIndex] = dbFetchRow("SELECT * FROM `ports` WHERE `device_id` = ? AND `ifIndex` = ?", array($device['device_id'], $ifIndex));
-      echo("Adding: ".$port['ifName']."(".$ifIndex.")(".$ports_db[$port['ifIndex']]['port_id'].")");
-    } elseif ($ports_db[$ifIndex]['deleted'] == "1") {
-      dbUpdate(array('deleted' => '0'), 'ports', '`port_id` = ?', array($ports_db[$ifIndex]['port_id']));
-      $ports_db[$ifIndex]['deleted'] = "0";
-      echo("U");
-    } else {
-      echo(".");
-    }
-    // We've seen it. Remove it from the cache.
-    unset($ports_l[$ifIndex]);
-  } else {
-    if (is_array($ports_db[$port['ifIndex']])) {
-      if ($ports_db[$port['ifIndex']]['deleted'] != "1")
-      {
-        dbUpdate(array('deleted' => '1'), 'ports', '`port_id` = ?', array($ports_db[$ifIndex]['port_id']));
-        $ports_db[$ifIndex]['deleted'] = "1";
-        echo("-");
-      }
-    }
-    echo("X");
-  }
-}
-// End New interface detection
+foreach ($port_stats as $ifIndex => $snmp_data) {
+    $snmp_data['ifIndex'] = $ifIndex; // Store ifIndex in port entry
 
-// Interface Deletion
-// If it's in our $ports_l list, that means it's not been seen. Mark it deleted.
-foreach ($ports_l as $ifIndex => $port_id)
-{
-  if ($ports_db[$ifIndex]['deleted'] == "0")
-  {
-    dbUpdate(array('deleted' => '1'), 'ports', '`port_id` = ?', array($port_id));
-    echo("-".$ifIndex);
-  }
-}
-// End interface deletion
-echo("\n");
+    // Get port_id according to port_association_mode used for this device
+    $port_id = get_port_id($ports_mapped, $snmp_data, $port_association_mode);
+
+    if (is_port_valid($snmp_data, $device)) {
+        port_fill_missing($snmp_data, $device);
+
+        // Port newly discovered?
+        if (!is_array($ports_db[$port_id])) {
+            $snmp_data['device_id'] = $device['device_id'];
+            $port_id = dbInsert($snmp_data, 'ports');
+            $ports[$port_id] = dbFetchRow('SELECT * FROM `ports` WHERE `device_id` = ? AND `port_id` = ?', [$device['device_id'], $port_id]);
+            echo 'Adding: ' . $snmp_data['ifName'] . '(' . $ifIndex . ')(' . $port_id . ')';
+        } elseif ($ports_db[$port_id]['deleted'] == 1) {
+            // Port re-discovered after previous deletion?
+            $snmp_data['deleted'] = 0;
+            dbUpdate($snmp_data, 'ports', '`port_id` = ?', [$port_id]);
+            $ports_db[$port_id]['deleted'] = 0;
+            echo 'U';
+        } else { // port is existing, let's update it with some data we have collected here
+            dbUpdate($snmp_data, 'ports', '`port_id` = ?', [$port_id]);
+            echo '.';
+        }
+    } else {
+        // Port vanished (mark as deleted)
+        if (is_array($ports_db[$port_id])) {
+            if ($ports_db[$port_id]['deleted'] != 1) {
+                dbUpdate(['deleted' => 1], 'ports', '`port_id` = ?', [$port_id]);
+                $ports_db[$port_id]['deleted'] = 1;
+                echo '-';
+            }
+        }
+
+        echo 'X';
+    }//end if
+}//end foreach
+
+unset(
+    $ports_mapped,
+    $port
+);
+
+echo "\n";
 
 // Clear Variables Here
 unset($port_stats);
 unset($ports_db);
-unset($ports_db_db);
-
-?>

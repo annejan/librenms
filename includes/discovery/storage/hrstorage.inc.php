@@ -1,59 +1,71 @@
 <?php
 
-$hrstorage_array = snmpwalk_cache_oid($device, "hrStorageEntry", NULL, "HOST-RESOURCES-MIB:HOST-RESOURCES-TYPES:NetWare-Host-Ext-MIB");
+use LibreNMS\Config;
 
-if (is_array($hrstorage_array))
-{
-  echo("hrStorage : ");
-  foreach ($hrstorage_array as $index => $storage)
-  {
-    $fstype = $storage['hrStorageType'];
-    $descr = $storage['hrStorageDescr'];
-    $size = $storage['hrStorageSize'] * $storage['hrStorageAllocationUnits'];
-    $used = $storage['hrStorageUsed'] * $storage['hrStorageAllocationUnits'];
-    $units = $storage['hrStorageAllocationUnits'];
+$hrstorage_array = snmpwalk_cache_oid($device, 'hrStorageEntry', null, 'HOST-RESOURCES-MIB:HOST-RESOURCES-TYPES:NetWare-Host-Ext-MIB');
 
-    switch($fstype)
-    {
-      case 'hrStorageVirtualMemory':
-      case 'hrStorageRam';
-      case 'hrStorageOther';
-      case 'nwhrStorageDOSMemory';
-      case 'nwhrStorageMemoryAlloc';
-      case 'nwhrStorageMemoryPermanent';
-      case 'nwhrStorageMemoryAlloc';
-      case 'nwhrStorageCacheBuffers';
-      case 'nwhrStorageCacheMovable';
-      case 'nwhrStorageCacheNonMovable';
-      case 'nwhrStorageCodeAndDataMemory';
-      case 'nwhrStorageDOSMemory';
-      case 'nwhrStorageIOEngineMemory';
-      case 'nwhrStorageMSEngineMemory';
-      case 'nwhrStorageUnclaimedMemory';
-        $deny = 1;
-        break;
-    }
+if (is_array($hrstorage_array)) {
+    echo 'hrStorage : ';
 
-    foreach ($config['ignore_mount'] as $bi) { if ($bi == $descr) { $deny = 1; if ($debug) echo("$bi == $descr \n"); } }
-    foreach ($config['ignore_mount_string'] as $bi) { if (strpos($descr, $bi) !== FALSE)     { $deny = 1; if ($debug) echo("strpos: $descr, $bi \n"); } }
-    foreach ($config['ignore_mount_regexp'] as $bi) { if (preg_match($bi, $descr) > "0") { $deny = 1; if ($debug) echo("preg_match $bi, $descr \n"); } }
+    $bad_fs_types = array(
+        'hrStorageVirtualMemory',
+        'hrStorageRam',
+        'hrStorageOther',
+        'nwhrStorageDOSMemory',
+        'nwhrStorageMemoryAlloc',
+        'nwhrStorageMemoryPermanent',
+        'nwhrStorageCacheBuffers',
+        'nwhrStorageCacheMovable',
+        'nwhrStorageCacheNonMovable',
+        'nwhrStorageCodeAndDataMemory',
+        'nwhrStorageIOEngineMemory',
+        'nwhrStorageMSEngineMemory',
+        'nwhrStorageUnclaimedMemory',
+    );
 
-    if (isset($config['ignore_mount_removable']) && $config['ignore_mount_removable'] && $fstype == "hrStorageRemovableDisk") { $deny = 1; if ($debug) echo("skip(removable)\n"); }
-    if (isset($config['ignore_mount_network']) && $config['ignore_mount_network'] && $fstype == "hrStorageNetworkDisk") { $deny = 1; if ($debug) echo("skip(network)\n"); }
-    if (isset($config['ignore_mount_optical']) && $config['ignore_mount_optical'] && $fstype == "hrStorageCompactDisc") { $deny = 1; if ($debug) echo("skip(cd)\n"); }
+    foreach ($hrstorage_array as $index => $storage) {
+        $fstype                   = $storage['hrStorageType'];
+        $descr                    = $storage['hrStorageDescr'];
+        $storage['hrStorageSize'] = fix_integer_value($storage['hrStorageSize']);
+        $storage['hrStorageUsed'] = fix_integer_value($storage['hrStorageUsed']);
+        $size  = ($storage['hrStorageSize'] * $storage['hrStorageAllocationUnits']);
+        $used  = ($storage['hrStorageUsed'] * $storage['hrStorageAllocationUnits']);
+        $units = $storage['hrStorageAllocationUnits'];
 
-    if (!$deny && is_numeric($index))
-    {
-      discover_storage($valid_storage, $device, $index, $fstype, "hrstorage", $descr, $size , $units, $used);
-    }
+        if (in_array($fstype, $bad_fs_types)) {
+            continue;
+        }
 
-    #$old_storage_rrd  = $config['rrd_dir'] . "/" . $device['hostname'] . "/" . safename("hrStorage-" . $index . ".rrd");
-    #$storage_rrd  = $config['rrd_dir'] . "/" . $device['hostname'] . "/" . safename("storage-hrstorage-" . $index . ".rrd");
-    #if (is_file($old_storage_rrd)) { rename($old_storage_rrd,$storage_rrd); }
+        if ($device['os'] == 'vmware' && $descr == 'Real Memory') {
+            $old_rrdfile = array('storage', 'hrstorage', $descr);
+            $new_rrdfile = array('mempool', 'hrstorage', $storage['hrStorageIndex']);
+            rrd_file_rename($device, $old_rrdfile, $new_rrdfile);
+            continue;
+        }
 
-    unset($deny, $fstype, $descr, $size, $used, $units, $storage_rrd, $old_storage_rrd, $hrstorage_array);
+        if (ignore_storage($device['os'], $descr)) {
+            continue;
+        }
 
-  }
-}
+        if (Config::get('ignore_mount_removable', false) && $fstype == 'hrStorageRemovableDisk') {
+            d_echo("skip(removable)\n");
+            continue;
+        }
 
-?>
+        if (Config::get('ignore_mount_network', false) && $fstype == 'hrStorageNetworkDisk') {
+            d_echo("skip(network)\n");
+            continue;
+        }
+
+        if (Config::get('ignore_mount_optical', false) && $fstype == 'hrStorageCompactDisc') {
+            d_echo("skip(cd)\n");
+            continue;
+        }
+
+        if (is_numeric($index)) {
+            discover_storage($valid_storage, $device, $index, $fstype, 'hrstorage', $descr, $size, $units, $used);
+        }
+
+        unset($deny, $fstype, $descr, $size, $used, $units, $storage_rrd, $old_storage_rrd, $hrstorage_array);
+    }//end foreach
+}//end if

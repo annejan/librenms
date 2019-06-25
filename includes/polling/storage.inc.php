@@ -1,55 +1,45 @@
 <?php
 
-$storage_cache = array();
+use LibreNMS\RRD\RrdDefinition;
 
-foreach (dbFetchRows("SELECT * FROM storage WHERE device_id = ?", array($device['device_id'])) as $storage)
-{
-  echo("Storage ".$storage['storage_descr'] . ": ");
+foreach (dbFetchRows('SELECT * FROM storage WHERE device_id = ?', array($device['device_id'])) as $storage) {
+    $descr = $storage['storage_descr'];
+    $mib = $storage['storage_mib'];
 
-  $storage_rrd  = $config['rrd_dir'] . "/" . $device['hostname'] . "/" . safename("storage-" . $storage['storage_mib'] . "-" . safename($storage['storage_descr']) . ".rrd");
+    echo 'Storage '. $descr .': ' . $mib . "\n\n\n\n";
 
-  if (!is_file($storage_rrd))
-  {
-   rrdtool_create($storage_rrd, "--step 300 DS:used:GAUGE:600:0:U DS:free:GAUGE:600:0:U ".$config['rrd_rra']);
-  }
+    $rrd_name = array('storage', $mib, $descr);
+    $rrd_def = RrdDefinition::make()
+        ->addDataset('used', 'GAUGE', 0)
+        ->addDataset('free', 'GAUGE', 0);
 
-  $file = $config['install_dir']."/includes/polling/storage/".$storage['storage_mib'].".inc.php";
-  if (is_file($file))
-  {
-    include($file);
-  } else {
-    // Generic poller goes here if we ever have a discovery module which uses it.
-  }
+    $file = \LibreNMS\Config::get('install_dir') . '/includes/polling/storage/' . $mib . '.inc.php';
+    if (is_file($file)) {
+        include $file;
+    }
 
-  if ($debug) {print_r($storage); }
+    d_echo($storage);
 
-  if ($storage['size'])
-  {
-    $percent = round($storage['used'] / $storage['size'] * 100);
-  }
-  else
-  {
-    $percent = 0;
-  }
+    if ($storage['size']) {
+        $percent = round(($storage['used'] / $storage['size'] * 100));
+    } else {
+        $percent = 0;
+    }
 
-  echo($percent."% ");
+    echo $percent.'% ';
 
-  rrdtool_update($storage_rrd,"N:".$storage['used'].":".$storage['free']);
+    $fields = array(
+        'used'   => $storage['used'],
+        'free'   => $storage['free'],
+    );
 
-  if ($config['memcached']['enable'])
-  {
-    $memcache->set('storage-'.$storage['storage_id'].'-used', $storage['used']);
-    $memcache->set('storage-'.$storage['storage_id'].'-free', $storage['free']);
-    $memcache->set('storage-'.$storage['storage_id'].'-size', $storage['size']);
-    $memcache->set('storage-'.$storage['storage_id'].'-units', $storage['units']);
-    $memcache->set('storage-'.$storage['storage_id'].'-perc', $percent);
-  } else {
-    $update = dbUpdate(array('storage_used' => $storage['used'], 'storage_free' => $storage['free'], 'storage_size' => $storage['size'], 'storage_units' => $storage['units'], 'storage_perc' => $percent), 'storage', '`storage_id` = ?', array($storage['storage_id']));
-  }
+    $tags = compact('mib', 'descr', 'rrd_name', 'rrd_def');
+    data_update($device, 'storage', $tags, $fields);
 
-  echo("\n");
-}
+    // NOTE: casting to string for mysqli bug (fixed by mysqlnd)
+    $update = dbUpdate(array('storage_used' => (string)$storage['used'], 'storage_free' => (string)$storage['free'], 'storage_size' => (string)$storage['size'], 'storage_units' => $storage['units'], 'storage_perc' => $percent), 'storage', '`storage_id` = ?', array($storage['storage_id']));
+
+    echo "\n";
+}//end foreach
 
 unset($storage);
-
-?>
