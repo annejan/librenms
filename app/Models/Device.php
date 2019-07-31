@@ -334,27 +334,6 @@ class Device extends BaseModel
         $this->save();
     }
 
-    /**
-     * @return string
-     */
-    public function statusName()
-    {
-        if ($this->disabled == 1) {
-            return 'disabled';
-        } elseif ($this->ignore == 1) {
-            return 'ignore';
-        } elseif ($this->status == 0) {
-            return 'down';
-        } else {
-            $warning_time = \LibreNMS\Config::get('uptime_warning', 84600);
-            if ($this->uptime < $warning_time && $this->uptime != 0) {
-                return 'warn';
-            }
-
-            return 'up';
-        }
-    }
-
     // ---- Accessors/Mutators ----
 
     public function getIconAttribute($icon)
@@ -497,6 +476,16 @@ class Device extends BaseModel
         return $this->belongsToMany('App\Models\DeviceGroup', 'device_group_device', 'device_id', 'device_group_id');
     }
 
+    public function ipv4()
+    {
+        return $this->hasManyThrough('App\Models\Ipv4Address', 'App\Models\Port', 'device_id', 'port_id', 'device_id', 'port_id');
+    }
+
+    public function ipv6()
+    {
+        return $this->hasManyThrough('App\Models\Ipv6Address', 'App\Models\Port', 'device_id', 'port_id', 'device_id', 'port_id');
+    }
+
     public function location()
     {
         return $this->belongsTo('App\Models\Location', 'location_id', 'id');
@@ -575,6 +564,26 @@ class Device extends BaseModel
     public function mplsLspPaths()
     {
         return $this->hasMany('App\Models\MplsLspPath', 'device_id');
+    }
+
+    public function mplsSdps()
+    {
+        return $this->hasMany('App\Models\MplsSdp', 'device_id');
+    }
+
+    public function mplsServices()
+    {
+        return $this->hasMany('App\Models\MplsService', 'device_id');
+    }
+
+    public function mplsSaps()
+    {
+        return $this->hasMany('App\Models\MplsSap', 'device_id');
+    }
+
+    public function mplsSdpBinds()
+    {
+        return $this->hasMany('App\Models\MplsSdpBind', 'device_id');
     }
 
     public function syslogs()

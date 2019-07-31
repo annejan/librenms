@@ -60,31 +60,61 @@ entered as a new line.
 | Config | Example |
 | ------ | ------- |
 | Alertmanager URL      | http://alertmanager.example.com |
-| Alertmanager Options: | source=librenms |
-| | customlabel=value |
+| Alertmanager Options: | source=librenms <br/> customlabel=value |
 
 ## API
 
-API transports definitions are a bit more complex than the E-Mail configuration.
+The API transport allows to reach any service provider using POST or GET URLs
+(Like SMS provider, etc). It can be used in multiple ways:
+- The same text built from the Alert template is available in the variable 
+``` $msg ```, which can then be sent as an option to the API. Be carefull that
+HTTP GET requests are usually limited in length.
+- The API-Option fields can be directly built from the variables defined in
+[Template-Syntax](Templates.md#syntax) but without the 'alert->' prefix.
+For instance, ``` $alert->uptime ``` is available as ``` $uptime ``` in the 
+API transport
 
-The URL can have the same placeholders as defined in the [Template-Syntax](Templates.md#syntax).
+A few variables commonly used :
 
-If the `Api Method` is `get`, all placeholders will be URL-Encoded.
-
-The API transport uses cURL to call the APIs, therefore you might need
-to install `php curl` to make it work.
-
-__Note__: it is highly recommended to define your own
-[Templates](Templates.md) when you want to use the API transport. The
-default template might exceed URL-length for GET requests and
-therefore cause all sorts of errors.
+| Variable            | Description |
+| ------------------  | ----------- |
+| {{ $hostname }}     | Hostname |
+| {{ $sysName }}      | SysName |
+| {{ $sysDescr }}     | SysDescr |
+| {{ $os }}           | OS of device (librenms defined) |
+| {{ $type }}         | Type of device (librenms defined) |
+| {{ $ip }}           | IP Address |
+| {{ $hardware }}     | Hardware |
+| {{ $version }}      | Version |
+| {{ $uptime }}       | Uptime in seconds |
+| {{ $uptime_short }} | Uptime in human-readable format |
+| {{ $timestamp }}    | Timestamp of alert |
+| {{ $description }}  | Description of device |
+| {{ $title }}        | Title (as built from the Alert Template) |
+| {{ $msg }}          | Body text (as built from the Alert Template) |
 
 **Example:**
 
+The example below will use the API named sms-api of my.example.com and send
+the title of the alert to the provided number using the provided service key. 
+Refer to your service documentation to configure it properly.
+
 | Config | Example |
 | ------ | ------- |
-| API Method | get |
-| API URL    | http://my.example.com/api |
+| API Method    | GET |
+| API URL       | http://my.example.com/sms-api
+| API Options   | rcpt=0123456789 <br/> key=0987654321abcdef <br/> msg=(LNMS) {{ $title }} |
+| API Username  | myUsername |
+| API Password  | myPassword |
+
+The example below will use the API named wall-display of my.example.com and send
+the title and text of the alert to a screen in the Network Operation Center.
+
+| Config | Example |
+| ------ | ------- |
+| API Method    | POST |
+| API URL       | http://my.example.com/wall-display
+| API Options   | title={{ $title }} <br/> msg={{ $msg }}|
 
 ## Boxcar
 
@@ -116,10 +146,13 @@ which are then converted to canopsis events.
 | Password | my_password |
 | Vhost | canopsis |
 
-## Cisco Spark
+## Cisco Spark (aka Webex Teams)
 
-Cisco Spark. LibreNMS can send alerts to a Cisco Spark room. To make
-this possible you need to have a RoomID and a token.
+Cisco Spark (now known as Webex Teams). LibreNMS can send alerts to a Cisco
+Spark room. To make this possible you need to have a RoomID and a token.
+You can also choose to send alerts using Markdown syntax.  Enabling this
+option provides for more richly formatted alerts, but be sure to adjust your
+alert template to account for the Markdown syntax.
 
 For more information about Cisco Spark RoomID and token, take a look here :
 
@@ -132,6 +165,7 @@ For more information about Cisco Spark RoomID and token, take a look here :
 | ------ | ------- |
 | API Token | ASd23r23edewda |
 | RoomID | 34243243251 |
+| Use Markdown? | x |
 
 ## Clickatell
 
@@ -211,9 +245,7 @@ for details on acceptable values.
 | API URL | https://api.hipchat.com/v1/rooms/message?auth_token=109jawregoaihj |
 | Room ID | 7654321 |
 | From Name | LibreNMS |
-| Options | color = red |
-|  | notify = 1 |
-|  | message_format = text |
+| Options | color = red <br/> notify = 1 <br/> message_format = text |
 
 At present the following options are supported: `color`, `notify` and `message_format`.
 
@@ -430,9 +462,7 @@ Application and setup the transport.
 | ------ | ------- |
 | Api Key | APPLICATIONAPIKEYGOESHERE |
 | User Key | USERKEYGOESHERE |
-| Pushover Options | sound_critical=falling |
-|  | sound_warning=siren |
-|  | sound_ok=magic |
+| Pushover Options | sound_critical=falling <br/> sound_warning=siren <br/> sound_ok=magic |
 
 ## Rocket.chat
 
@@ -448,10 +478,7 @@ required value is for url, without this then no call to Rocket.chat will be made
 | Config | Example |
 | ------ | ------- |
 | Webhook URL | https://rocket.url/api/v1/chat.postMessage |
-| Rocket.chat Options | channel=#Alerting |
-|  | username=myname |
-|  | icon_url=http://someurl/image.gif |
-|  | icon_emoji=:smirk: |
+| Rocket.chat Options | channel=#Alerting <br/> username=myname <br/> icon_url=http://someurl/image.gif <br/> icon_emoji=:smirk: |
 
 ## Slack
 
@@ -491,8 +518,7 @@ either local or international dialling format.
 | SMSEagle Host | ip.add.re.ss |
 | User | smseagle_user |
 | Password | smseagle_user_password |
-| Mobiles | +3534567890 |
-|  | 0834567891 |
+| Mobiles | +3534567890 <br/> 0834567891 |
 
 ## Syslog
 
