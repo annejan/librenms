@@ -1,11 +1,10 @@
 <?php
 
 // FIXME svn stuff still using optc etc, won't work, needs updating!
-use LibreNMS\Authentication\LegacyAuth;
 use LibreNMS\Config;
 use Symfony\Component\Process\Process;
 
-if (LegacyAuth::user()->hasGlobalAdmin()) {
+if (Auth::user()->hasGlobalAdmin()) {
     if (!is_array(Config::get('rancid_configs'))) {
         Config::set('rancid_configs', array(Config::get('rancid_configs')));
     }
@@ -317,18 +316,14 @@ if (LegacyAuth::user()->hasGlobalAdmin()) {
                           </div>';
     }
     if (!empty($text)) {
-        if (isset($previous_config)) {
-            $language = 'diff';
-        } else {
-            $language = 'ios';
-        }
-        $geshi = new GeSHi($text, $language);
+        $language = isset($previous_config) ? 'diff' : Config::getOsSetting($device['os'], 'config_highlighting', 'ios');
+        $geshi = new GeSHi(htmlspecialchars_decode($text), $language);
         $geshi->enable_line_numbers(GESHI_FANCY_LINE_NUMBERS);
         $geshi->set_overall_style('color: black;');
         // $geshi->set_line_style('color: #999999');
         echo '<div class="config">';
         echo '<input id="linenumbers" class="btn btn-primary" type="submit" value="Hide line numbers"/>';
-        echo htmlspecialchars_decode($geshi->parse_code());
+        echo $geshi->parse_code();
         echo '</div>';
     }
 }//end if

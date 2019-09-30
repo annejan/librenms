@@ -37,8 +37,7 @@ usermod -a -G librenms www-data
 chown -R librenms:librenms /opt/librenms
 chmod 770 /opt/librenms
 setfacl -d -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
-setfacl -R -m g::rwx /opt/librenms/rrd /opt/librenms/logs
-/opt/librenms/bootstrap/cache/ /opt/librenms/storage/
+setfacl -R -m g::rwx /opt/librenms/rrd /opt/librenms/logs /opt/librenms/bootstrap/cache/ /opt/librenms/storage/
 ```
 
 # Install PHP dependencies
@@ -88,7 +87,7 @@ systemctl restart mysql
 ## Configure and Start PHP-FPM
 
 Ensure date.timezone is set in php.ini to your preferred time zone.
-See http://php.net/manual/en/timezones.php for a list of supported
+See <http://php.net/manual/en/timezones.php> for a list of supported
 timezones.  Valid examples are: "America/New_York",
 "Australia/Brisbane", "Etc/UTC".
 
@@ -152,7 +151,7 @@ Edit the text which says `RANDOMSTRINGGOESHERE` and set your own community strin
 
 ```
 curl -o /usr/bin/distro https://raw.githubusercontent.com/librenms/librenms-agent/master/snmp/distro
-hmod +x /usr/bin/distro
+chmod +x /usr/bin/distro
 systemctl restart snmpd
 ```
 

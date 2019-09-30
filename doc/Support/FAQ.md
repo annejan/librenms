@@ -40,6 +40,7 @@ path: blob/master/doc/
 - [My reverse proxy is not working](#my-reverse-proxy-is-not-working)
 - [My alerts aren't being delivered on time](#my-alerts-aren't-being-delivered-on-time)
 - [My alert templates stopped working](#my-alert-templates-stopped-working)
+- [How do I use trend prediction in graphs](#how-do-i-use-trend-prediction-in-graphs)
 
 # Developing
 
@@ -368,7 +369,10 @@ adding to /etc/snmp/snmpd.conf :
 
 ## <a name="faq8"> How do I add support for a new OS?</a>
 
-Please see [Supporting a new OS](../Developing/Support-New-OS.md)
+Please see [Supporting a new OS](../Developing/Support-New-OS.md) if you are adding all
+the support yourself, i.e. writing all of the supporting code. If you are only able
+to supply supporting info, and would like the help of others to write up the code, please
+follow the below steps.
 
 ## <a name="faq20"> What information do you need to add a new OS?</a>
 
@@ -570,4 +574,16 @@ new template syntax:
 syntax changed, and you basically need to convert your templates to
 this new syntax (including the titles).
 
+## <a name='how-do-i-use-trend-prediction-in-graphs'>How do I use trend prediction in graphs</a>
+
+As of [Ver. 1.55](https://community.librenms.org/t/v1-55-release-changelog-august-2019/9428) a new feature has been added where you can view a simple linear prediction in port graphs. 
+
+> It doesn't work on non-port graphs or consolidated graphs at the time this FAQ entry was written.
+
+To view a prediction:
+- Click on any `port` graph of any network device
+- Select a `From` date to your liking (not earlier than the device was actually added to LNMS), and then select a future date in the `To` field. 
+- Click update
+
+You should now see a linear prediction line on the graph.
 
